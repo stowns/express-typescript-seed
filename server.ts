@@ -13,6 +13,9 @@ import {MessageManager} from "./managers/MessageManager";
 import {InternalServerError} from "./errors/InternalServerError";
 import {logger} from "./lib/logger";
 import morgan = require("morgan");
+import * as graphqlHTTP from "express-graphql";
+import * as GraphQLToolsSequelize from "graphql-tools-sequelize";
+import {GraphQLSchemaBuilder} from "./models/GraphQLSchemaBuilder";
 
 const amqplib = require('amqplib');
 
@@ -56,10 +59,20 @@ export class Server {
             });
 
             // Initialize Database then bootstrap application
+            let db;
             try {
-                await Server.initializeDatabase();
+                db = await Server.initializeDatabase();
             } catch(error) {
                 logger.error("Failed to initialize database", error);
+            }
+
+            try {
+                // Initialize GraphQL
+                const gts = new GraphQLToolsSequelize(db);
+                await gts.boot();
+                Server.initializeGraphQLEndpoint(GraphQLSchemaBuilder.build(gts));
+            } catch (error) {
+                logger.error("Failed to bootstrap graphql", error);
             }
 
             return Server.app.listen(Server.app.get("port"));
@@ -93,6 +106,13 @@ export class Server {
     private static initializeRoles() {
         Roles.buildRoles();
         Server.app.use(Roles.middleware());
+    }
+
+    private static initializeGraphQLEndpoint(schema) {
+        Server.app.use('/graphql', graphqlHTTP({
+            schema: schema,
+            graphiql: true
+        }));
     }
 
     private static configureApp() {
